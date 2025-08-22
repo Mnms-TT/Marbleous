@@ -1,0 +1,15 @@
+{
+  "name": "multiplayer-game-lobby",
+  "version": "1.0.0",
+  "description": "Un système de salon de jeu multijoueur avec Node.js, Express et Socket.IO",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2"
+  }
+}
