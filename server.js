@@ -6,9 +6,8 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-const PORT = process.env.PORT |
-
-| 3000;
+// Le port doit utiliser l'opérateur OU logique '||' sans espace.
+const PORT = process.env.PORT || 3000;
 
 // Servir les fichiers statiques du dossier 'public'
 app.use(express.static('public'));
@@ -57,7 +56,7 @@ io.on('connection', (socket) => {
             id: socket.id,
             isReady: false,
             isAlive: true,
-            team: (room.playerCount % 2 === 0)? 'A' : 'B' // Assignation simple aux équipes
+            team: (room.playerCount % 2 === 0) ? 'A' : 'B' // Assignation simple aux équipes
         };
         room.playerCount++;
 
@@ -73,7 +72,7 @@ io.on('connection', (socket) => {
         const room = rooms[socket.roomId];
         if (room && room.players[socket.id]) {
             const player = room.players[socket.id];
-            player.isReady =!player.isReady;
+            player.isReady = !player.isReady;
 
             io.to(socket.roomId).emit('updateRoom', room);
             checkGameStart(socket.roomId);
@@ -91,17 +90,20 @@ io.on('connection', (socket) => {
         const roomId = socket.roomId;
         if (roomId && rooms[roomId]) {
             const room = rooms[roomId];
-            delete room.players[socket.id];
-            room.playerCount--;
+            // S'assurer que le joueur existe avant de le supprimer
+            if (room.players[socket.id]) {
+                delete room.players[socket.id];
+                room.playerCount--;
 
-            // Si le jeu était en cours, vérifier la condition de victoire
-            if (room.gameState === 'IN_PROGRESS') {
-                checkWinCondition(roomId);
+                // Si le jeu était en cours, vérifier la condition de victoire
+                if (room.gameState === 'IN_PROGRESS') {
+                    checkWinCondition(roomId);
+                }
+
+                // Mettre à jour les clients restants et la liste des salons
+                io.to(roomId).emit('updateRoom', room);
+                io.emit('roomListUpdate', getRoomListData());
             }
-
-            // Mettre à jour les clients restants et la liste des salons
-            io.to(roomId).emit('updateRoom', room);
-            io.emit('roomListUpdate', getRoomListData());
         }
     });
 });
@@ -123,9 +125,8 @@ function getRoomListData() {
 
 function checkGameStart(roomId) {
     const room = rooms[roomId];
-    if (!room |
-
-| room.gameState!== 'LOBBY_VOTING') return;
+    // Correction de l'opérateur OU logique '||'
+    if (!room || room.gameState !== 'LOBBY_VOTING') return;
 
     const readyPlayers = Object.values(room.players).filter(p => p.isReady).length;
     const totalPlayers = room.playerCount;
@@ -155,9 +156,8 @@ function startGame(roomId) {
 
 function checkWinCondition(roomId) {
     const room = rooms[roomId];
-    if (!room |
-
-| room.gameState!== 'IN_PROGRESS') return;
+    // Correction de l'opérateur OU logique '||'
+    if (!room || room.gameState !== 'IN_PROGRESS') return;
 
     const activeTeams = new Set();
     Object.values(room.players).forEach(player => {
@@ -167,41 +167,51 @@ function checkWinCondition(roomId) {
     });
 
     if (activeTeams.size <= 1) {
-        const winningTeam = activeTeams.size === 1? activeTeams.values().next().value : null;
+        const winningTeam = activeTeams.size === 1 ? activeTeams.values().next().value : null;
         endGame(roomId, winningTeam);
     }
 }
 
 function endGame(roomId, winningTeam) {
     const room = rooms[roomId];
+    if (!room) return;
     room.gameState = 'GAME_OVER';
     io.to(roomId).emit('gameOver', { winningTeam });
     console.log(`Partie terminée dans le salon ${roomId}. Équipe gagnante: ${winningTeam}`);
 
     // Réinitialiser le salon après un délai pour retourner au vote
     setTimeout(() => {
-        room.gameState = 'LOBBY_VOTING';
-        Object.values(room.players).forEach(player => {
-            player.isReady = false;
-            player.isAlive = true;
-        });
-        io.to(roomId).emit('updateRoom', room);
+        if (rooms[roomId]) { // Vérifier si le salon existe toujours
+            room.gameState = 'LOBBY_VOTING';
+            Object.values(room.players).forEach(player => {
+                player.isReady = false;
+                player.isAlive = true;
+            });
+            io.to(roomId).emit('updateRoom', room);
+        }
     }, 10000); // 10 secondes avant de retourner au salon
 }
 
 // Fonction de simulation pour le test
 function simulatePlayerElimination(roomId) {
     const room = rooms[roomId];
-    if (room.gameState!== 'IN_PROGRESS') return;
+    if (!room || room.gameState !== 'IN_PROGRESS') return;
 
     const alivePlayers = Object.values(room.players).filter(p => p.isAlive);
     if (alivePlayers.length > 1) {
-        const playerToEliminate = alivePlayers;
-        playerToEliminate.isAlive = false;
-        console.log(`Joueur ${playerToEliminate.id} éliminé dans le salon ${roomId}`);
-        io.to(roomId).emit('playerEliminated', playerToEliminate.id);
-        io.to(roomId).emit('updateRoom', room);
-        checkWinCondition(roomId);
+        // CORRECTION: Sélectionner un joueur au hasard à éliminer
+        const playerToEliminate = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
+        
+        // S'assurer que le joueur existe toujours dans l'état du salon avant de le modifier
+        if (room.players[playerToEliminate.id]) {
+            room.players[playerToEliminate.id].isAlive = false;
+            console.log(`Joueur ${playerToEliminate.id} éliminé dans le salon ${roomId}`);
+            
+            // On ne notifie l'élimination que si elle a bien eu lieu
+            io.to(roomId).emit('playerEliminated', playerToEliminate.id);
+            io.to(roomId).emit('updateRoom', room);
+            checkWinCondition(roomId);
+        }
     }
 }
 
