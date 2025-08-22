@@ -3,18 +3,266 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Accueil - Choix du Salon</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Lobby de Jeu</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .thumbnail {
+            transition: all 0.3s ease;
+            border: 4px solid transparent;
+            background-color: #374151; /* gray-700 */
+        }
+        .thumbnail.ready {
+            border-color: #4ade80; /* green-400 */
+            transform: scale(1.05);
+        }
+        .thumbnail.team-a { background-color: #bfdbfe; /* blue-200 */ }
+        .thumbnail.team-b { background-color: #fecaca; /* red-300 */ }
+        .thumbnail.dead { opacity: 0.4; filter: grayscale(100%); }
+        .fixed-grid {
+            display: grid;
+            grid-template-rows: 140px 140px;
+            grid-auto-flow: column;
+            grid-auto-columns: 110px;
+            gap: 1rem;
+            overflow-x: auto;
+            padding: 1rem;
+            scrollbar-width: thin;
+        }
+        #chat-messages { scroll-behavior: smooth; }
+    </style>
 </head>
-<body>
-    <div class="main-container">
-        <h1>Bienvenue!</h1>
-        <p>Choisissez un salon de jeu pour commencer.</p>
-        <div id="room-list" class="room-list-container">
+<body class="bg-gray-900 text-white h-screen flex flex-col p-4 gap-4">
+
+    <!-- Conteneur principal avec layout Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 flex-grow min-h-0">
+
+        <!-- Colonne principale (Salons / Jeu) -->
+        <main class="lg:col-span-3 bg-gray-800 rounded-lg flex flex-col p-4">
+            <!-- Vue Lobby -->
+            <div id="lobby-view" class="flex flex-col h-full">
+                <h1 class="text-3xl font-bold text-center mb-4">Choisissez un Salon</h1>
+                <div id="room-list" class="fixed-grid flex-grow">
+                    <!-- Les salons seront injectés ici -->
+                </div>
             </div>
+
+            <!-- Vue Salle de Jeu -->
+            <div id="game-room-view" class="hidden flex flex-col h-full">
+                 <div class="flex justify-between items-center mb-4">
+                    <h2 id="room-title" class="text-3xl font-bold">Salon de Jeu</h2>
+                    <button id="leave-room-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Quitter</button>
+                </div>
+                <div id="game-status" class="text-center text-xl font-semibold my-2 p-3 bg-gray-900 rounded-lg"></div>
+                <div id="player-grid" class="fixed-grid flex-grow">
+                    <!-- Les joueurs seront injectés ici -->
+                </div>
+            </div>
+        </main>
+
+        <!-- Colonne de droite (Joueurs & Chat) -->
+        <aside class="bg-gray-800 rounded-lg flex flex-col p-4 min-h-0">
+            <!-- Liste des joueurs connectés -->
+            <div class="flex-shrink-0">
+                <h2 class="text-2xl font-bold mb-3">Joueurs en Ligne</h2>
+                <div id="player-list" class="space-y-2 max-h-48 overflow-y-auto pr-2">
+                    <!-- La liste des joueurs sera injectée ici -->
+                </div>
+            </div>
+            <hr class="border-gray-600 my-4">
+            <!-- Chat global -->
+            <div class="flex flex-col flex-grow min-h-0">
+                <h2 class="text-2xl font-bold mb-3 flex-shrink-0">Chat</h2>
+                <div id="chat-messages" class="flex-grow overflow-y-auto mb-3 pr-2 space-y-2">
+                    <!-- Les messages du chat apparaîtront ici -->
+                </div>
+                <form id="chat-form" class="flex-shrink-0 flex gap-2">
+                    <input id="chat-input" type="text" placeholder="Votre message..." class="flex-grow bg-gray-700 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Envoyer</button>
+                </form>
+            </div>
+        </aside>
+
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="lobby.js"></script>
+    <!-- Modale d'erreur -->
+    <div id="error-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-gray-800 rounded-lg p-8 max-w-sm text-center">
+            <h3 class="text-2xl font-bold mb-4 text-red-500">Erreur</h3>
+            <p id="error-message" class="mb-6">Message d'erreur.</p>
+            <button onclick="document.getElementById('error-modal').classList.add('hidden')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg">OK</button>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+
+        // Vues et éléments principaux
+        const lobbyView = document.getElementById('lobby-view');
+        const gameRoomView = document.getElementById('game-room-view');
+        const roomList = document.getElementById('room-list');
+        const playerGrid = document.getElementById('player-grid');
+        const roomTitle = document.getElementById('room-title');
+        const gameStatus = document.getElementById('game-status');
+        const playerList = document.getElementById('player-list');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatForm = document.getElementById('chat-form');
+        const chatInput = document.getElementById('chat-input');
+        const leaveRoomBtn = document.getElementById('leave-room-btn');
+        const errorModal = document.getElementById('error-modal');
+        const errorMessage = document.getElementById('error-message');
+
+        let myPlayerId = null;
+        let inactivityTimer;
+
+        // --- Logique d'affichage ---
+        function showLobby() {
+            lobbyView.classList.remove('hidden');
+            gameRoomView.classList.add('hidden');
+        }
+
+        function showGameRoom() {
+            lobbyView.classList.add('hidden');
+            gameRoomView.classList.remove('hidden');
+        }
+        
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorModal.classList.remove('hidden');
+        }
+
+        // --- Rendu des éléments ---
+        function renderRoomList(rooms) {
+            roomList.innerHTML = '';
+            Object.values(rooms).forEach(room => {
+                const roomElement = document.createElement('div');
+                roomElement.className = 'thumbnail rounded-lg flex flex-col items-center justify-center p-2 cursor-pointer hover:border-blue-500';
+                roomElement.innerHTML = `
+                    <div class="text-4xl mb-2">🚪</div>
+                    <p class="font-bold text-white text-sm truncate w-full text-center">${room.name}</p>
+                    <p class="font-mono text-xs text-gray-400">${room.playerCount} / ${room.maxPlayers}</p>
+                `;
+                if (room.playerCount >= room.maxPlayers) {
+                    roomElement.classList.add('opacity-50', 'cursor-not-allowed');
+                } else {
+                    roomElement.addEventListener('click', () => socket.emit('joinRoom', room.id));
+                }
+                roomList.appendChild(roomElement);
+            });
+        }
+
+        function renderGameRoom(room) {
+            roomTitle.textContent = room.name;
+            playerGrid.innerHTML = '';
+            Object.values(room.players).forEach(player => {
+                const playerEl = document.createElement('div');
+                playerEl.id = `player-${player.id}`;
+                let classes = `thumbnail rounded-lg flex flex-col items-center justify-center p-2 ${player.team === 'A' ? 'team-a' : 'team-b'}`;
+                if (!player.isAlive) classes += ' dead';
+                if (player.isReady && room.gameState === 'LOBBY_VOTING') classes += ' ready';
+                if (player.id === myPlayerId && room.gameState === 'LOBBY_VOTING') classes += ' cursor-pointer hover:scale-105';
+                playerEl.className = classes;
+
+                playerEl.innerHTML = `
+                    <div class="text-4xl mb-2">${player.team === 'A' ? '🔵' : '🔴'}</div>
+                    <p class="font-bold text-black text-sm truncate w-full text-center">Joueur</p>
+                    <p class="font-mono text-xs text-gray-700">${player.id.substring(0, 5)}</p>
+                    ${player.isReady ? '<span class="text-green-800 font-bold text-xs mt-1">PRÊT</span>' : ''}
+                `;
+
+                if (player.id === myPlayerId && room.gameState === 'LOBBY_VOTING') {
+                    playerEl.addEventListener('click', () => socket.emit('playerReady'));
+                }
+                playerGrid.appendChild(playerEl);
+            });
+            updateGameStatus(room);
+        }
+
+        function updateGameStatus(room) {
+            switch (room.gameState) {
+                case 'LOBBY_VOTING':
+                    const readyCount = Object.values(room.players).filter(p => p.isReady).length;
+                    gameStatus.textContent = `Vote en cours: ${readyCount} / ${room.playerCount} prêts.`;
+                    break;
+                case 'IN_PROGRESS':
+                    gameStatus.textContent = 'Partie en cours !';
+                    break;
+                case 'GAME_OVER':
+                    // Géré par l'event 'gameOver'
+                    break;
+            }
+        }
+
+        function renderPlayerList(players) {
+            playerList.innerHTML = '';
+            players.forEach(player => {
+                const playerEl = document.createElement('div');
+                playerEl.className = 'bg-gray-700 p-2 rounded-md text-sm';
+                playerEl.textContent = `Joueur ${player.id.substring(0, 5)}`;
+                playerList.appendChild(playerEl);
+            });
+        }
+
+        function addChatMessage({ senderId, message }) {
+            const messageEl = document.createElement('p');
+            const senderName = senderId === myPlayerId ? 'Vous' : `Joueur ${senderId.substring(0, 5)}`;
+            messageEl.innerHTML = `<strong class="${senderId === myPlayerId ? 'text-blue-400' : 'text-green-400'}">${senderName}:</strong> ${message}`;
+            chatMessages.appendChild(messageEl);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // --- Événements Socket.IO ---
+        socket.on('connect', () => {
+            myPlayerId = socket.id;
+            console.log('Connecté au serveur ! ID:', myPlayerId);
+        });
+
+        socket.on('roomListUpdate', renderRoomList);
+        socket.on('updatePlayerList', renderPlayerList);
+        socket.on('chatMessage', addChatMessage);
+        
+        socket.on('updateRoom', (room) => {
+            // C'est ici que la magie opère pour corriger la page blanche
+            showGameRoom();
+            renderGameRoom(room);
+        });
+        
+        socket.on('gameStarted', (room) => {
+            renderGameRoom(room);
+            gameStatus.textContent = 'La partie commence !';
+        });
+        
+        socket.on('gameOver', ({ winningTeam }) => {
+            gameStatus.textContent = winningTeam ? `L'équipe ${winningTeam === 'A' ? 'Bleue' : 'Rouge'} a gagné !` : 'Match nul !';
+        });
+
+        socket.on('error', showError);
+        
+        socket.on('forceDisconnect', (message) => {
+            alert(message);
+            window.location.reload();
+        });
+        
+        socket.on('disconnect', () => {
+            showError('Déconnecté du serveur. Rechargement...');
+            setTimeout(() => window.location.reload(), 3000);
+        });
+
+        // --- Gestionnaires d'événements DOM ---
+        leaveRoomBtn.addEventListener('click', () => {
+            window.location.reload();
+        });
+
+        chatForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const message = chatInput.value;
+            if (message.trim()) {
+                socket.emit('sendMessage', message);
+                chatInput.value = '';
+            }
+        });
+
+    </script>
 </body>
 </html>
