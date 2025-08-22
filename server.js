@@ -61,6 +61,7 @@ const GameLogic = {
     findBestSnapSpot(grid, bubble, bubbleRadius) {
         let best = null, minD = Infinity;
         for (let r = 0; r < Config.GRID_ROWS; r++) for (let c = 0; c < Config.GRID_COLS; c++) if (!grid[r][c]) {
+            // THIS IS THE CRITICAL FIX: Ensure the spot is connected to the ceiling or another bubble
             if (r === 0 || this.getNeighborCoords(r, c).some(n => grid[n.r]?.[n.c])) {
                 const { x, y } = this.getBubbleCoords(r, c, bubbleRadius); const d = Math.hypot(bubble.x - x, bubble.y - y);
                 if (d < minD) { minD = d; best = { r, c }; }
