@@ -3,266 +3,327 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lobby de Jeu</title>
+    <title>Marbleous Online</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/socket.io/socket.io.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        .thumbnail {
-            transition: all 0.3s ease;
-            border: 4px solid transparent;
-            background-color: #374151; /* gray-700 */
+        body { font-family: 'Inter', sans-serif; overflow: hidden; touch-action: none; background-color: #0c1445; }
+        .ui-bg { background-color: #0c1445; }
+        .game-area-bg {
+            background-color: #fb923c;
+            background-image:
+                linear-gradient(rgba(255,255,255,.07) 2px, transparent 2px),
+                linear-gradient(90deg, rgba(255,255,255,.07) 2px, transparent 2px),
+                linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px);
+            background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
+            background-position:-2px -2px, -2px -2px, -1px -1px, -1px -1px;
+            border: 2px solid #ffffff;
         }
-        .thumbnail.ready {
-            border-color: #4ade80; /* green-400 */
-            transform: scale(1.05);
+        .thumbnail { transition: all 0.3s ease; border: 2px solid #ffffff; border-radius: 0.5rem; position: relative; }
+        .thumbnail.ready { border-color: #4ade80; transform: scale(1.05); box-shadow: 0 0 15px #4ade80; }
+        .opponent-view { position: relative; border-radius: 0.5rem; cursor: pointer; transition: all 0.2s; border: 2px solid #ffffff; }
+        .opponent-view.empty-slot { background: #0c1445; border-style: dashed; }
+        .opponent-canvas { width: 100%; height: 100%; object-fit: contain; border-radius: 0.5rem; }
+        .lobby-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; padding: 1rem; }
+        #gameCanvas { cursor: default; }
+        .ready-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0, 0, 0, 0.6); color: #4CAF50;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.5rem; font-weight: bold; text-shadow: 0 0 10px rgba(76, 175, 80, 0.7);
+            z-index: 10; pointer-events: none; border-radius: 0.5rem;
         }
-        .thumbnail.team-a { background-color: #bfdbfe; /* blue-200 */ }
-        .thumbnail.team-b { background-color: #fecaca; /* red-300 */ }
-        .thumbnail.dead { opacity: 0.4; filter: grayscale(100%); }
-        .fixed-grid {
-            display: grid;
-            grid-template-rows: 140px 140px;
-            grid-auto-flow: column;
-            grid-auto-columns: 110px;
-            gap: 1rem;
-            overflow-x: auto;
-            padding: 1rem;
-            scrollbar-width: thin;
-        }
-        #chat-messages { scroll-behavior: smooth; }
     </style>
 </head>
-<body class="bg-gray-900 text-white h-screen flex flex-col p-4 gap-4">
+<body class="text-white flex flex-col items-center justify-center min-h-screen p-4">
 
-    <!-- Conteneur principal avec layout Grid -->
-    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 flex-grow min-h-0">
-
-        <!-- Colonne principale (Salons / Jeu) -->
-        <main class="lg:col-span-3 bg-gray-800 rounded-lg flex flex-col p-4">
-            <!-- Vue Lobby -->
-            <div id="lobby-view" class="flex flex-col h-full">
-                <h1 class="text-3xl font-bold text-center mb-4">Choisissez un Salon</h1>
-                <div id="room-list" class="fixed-grid flex-grow">
-                    <!-- Les salons seront injectés ici -->
-                </div>
-            </div>
-
-            <!-- Vue Salle de Jeu -->
-            <div id="game-room-view" class="hidden flex flex-col h-full">
-                 <div class="flex justify-between items-center mb-4">
-                    <h2 id="room-title" class="text-3xl font-bold">Salon de Jeu</h2>
-                    <button id="leave-room-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Quitter</button>
-                </div>
-                <div id="game-status" class="text-center text-xl font-semibold my-2 p-3 bg-gray-900 rounded-lg"></div>
-                <div id="player-grid" class="fixed-grid flex-grow">
-                    <!-- Les joueurs seront injectés ici -->
-                </div>
-            </div>
-        </main>
-
-        <!-- Colonne de droite (Joueurs & Chat) -->
-        <aside class="bg-gray-800 rounded-lg flex flex-col p-4 min-h-0">
-            <!-- Liste des joueurs connectés -->
-            <div class="flex-shrink-0">
-                <h2 class="text-2xl font-bold mb-3">Joueurs en Ligne</h2>
-                <div id="player-list" class="space-y-2 max-h-48 overflow-y-auto pr-2">
-                    <!-- La liste des joueurs sera injectée ici -->
-                </div>
-            </div>
-            <hr class="border-gray-600 my-4">
-            <!-- Chat global -->
-            <div class="flex flex-col flex-grow min-h-0">
-                <h2 class="text-2xl font-bold mb-3 flex-shrink-0">Chat</h2>
-                <div id="chat-messages" class="flex-grow overflow-y-auto mb-3 pr-2 space-y-2">
-                    <!-- Les messages du chat apparaîtront ici -->
-                </div>
-                <form id="chat-form" class="flex-shrink-0 flex gap-2">
-                    <input id="chat-input" type="text" placeholder="Votre message..." class="flex-grow bg-gray-700 rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">Envoyer</button>
-                </form>
-            </div>
-        </aside>
-
+    <!-- Vue Lobby -->
+    <div id="lobby-view" class="w-full max-w-screen-2xl mx-auto">
+        <h1 class="text-4xl font-bold text-center mb-4">Marbleous Online</h1>
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            <main class="lg:col-span-3 ui-bg p-4 rounded-lg border-2 border-white">
+                <h2 class="text-2xl font-bold text-center mb-4">Choisissez un Salon</h2>
+                <div id="room-list" class="lobby-grid"></div>
+            </main>
+            <aside class="ui-bg p-4 rounded-lg border-2 border-white flex flex-col">
+                <h2 class="text-2xl font-bold mb-3">Joueurs en Ligne (<span id="global-player-count">0</span>)</h2>
+                <div id="player-list" class="space-y-2 flex-grow overflow-y-auto pr-2"></div>
+            </aside>
+        </div>
     </div>
 
-    <!-- Modale d'erreur -->
-    <div id="error-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-        <div class="bg-gray-800 rounded-lg p-8 max-w-sm text-center">
-            <h3 class="text-2xl font-bold mb-4 text-red-500">Erreur</h3>
-            <p id="error-message" class="mb-6">Message d'erreur.</p>
-            <button onclick="document.getElementById('error-modal').classList.add('hidden')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg">OK</button>
+    <!-- Vue Salle de Jeu -->
+    <div id="game-room-view" class="hidden w-full max-w-screen-2xl mx-auto">
+        <div class="flex justify-between items-center mb-2">
+            <div>
+                <h1 id="room-title" class="text-3xl sm:text-4xl font-bold"></h1>
+                <p id="game-status" class="text-sm text-gray-400"></p>
+            </div>
+            <button id="leave-room-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg">Quitter</button>
+        </div>
+        <div class="flex flex-col lg:flex-row gap-4">
+            <div class="flex-grow w-full lg:w-1/3">
+                <div class="flex justify-between items-center ui-bg p-3 rounded-t-lg text-lg border-2 border-b-0 border-white">
+                    <div>Niveau: <span id="level">1</span></div>
+                    <div>Score: <span id="score">0</span></div>
+                </div>
+                <div id="canvas-container" class="relative w-full game-area-bg" style="aspect-ratio: 8 / 11;">
+                    <canvas id="gameCanvas"></canvas>
+                </div>
+                <div class="w-full ui-bg p-3 rounded-b-lg border-2 border-t-0 border-white">
+                    <div id="spellInventory" class="flex justify-center items-center gap-2 mt-2"></div>
+                </div>
+            </div>
+            <div class="w-full lg:w-2/3 flex flex-col gap-4">
+                <div id="opponents-grid" class="grid grid-cols-3 sm:grid-cols-5 gap-2 flex-grow"></div>
+            </div>
         </div>
     </div>
 
     <script>
-        const socket = io();
+    document.addEventListener('DOMContentLoaded', () => {
+        if (typeof io === 'undefined') {
+            document.body.innerHTML = `<div class="w-full h-screen flex items-center justify-center text-center text-white p-8"><div><h1 class="text-3xl font-bold text-red-500 mb-4">Erreur de Connexion</h1><p class="text-lg">Impossible de charger la librairie de communication (Socket.IO).</p><p class="mt-2 text-gray-400">Assurez-vous que le serveur Node.js (<code class="bg-gray-700 p-1 rounded">server.js</code>) est bien en cours d'exécution.</p></div></div>`;
+            return;
+        }
 
-        // Vues et éléments principaux
+        const socket = io();
         const lobbyView = document.getElementById('lobby-view');
         const gameRoomView = document.getElementById('game-room-view');
-        const roomList = document.getElementById('room-list');
-        const playerGrid = document.getElementById('player-grid');
-        const roomTitle = document.getElementById('room-title');
-        const gameStatus = document.getElementById('game-status');
-        const playerList = document.getElementById('player-list');
-        const chatMessages = document.getElementById('chat-messages');
-        const chatForm = document.getElementById('chat-form');
-        const chatInput = document.getElementById('chat-input');
-        const leaveRoomBtn = document.getElementById('leave-room-btn');
-        const errorModal = document.getElementById('error-modal');
-        const errorMessage = document.getElementById('error-message');
+        const roomListEl = document.getElementById('room-list');
+        const playerListEl = document.getElementById('player-list');
+        const globalPlayerCountEl = document.getElementById('global-player-count');
 
         let myPlayerId = null;
-        let inactivityTimer;
 
-        // --- Logique d'affichage ---
-        function showLobby() {
-            lobbyView.classList.remove('hidden');
-            gameRoomView.classList.add('hidden');
-        }
+        function showLobby() { lobbyView.classList.remove('hidden'); gameRoomView.classList.add('hidden'); }
+        function showGameRoom() { lobbyView.classList.add('hidden'); gameRoomView.classList.remove('hidden'); }
 
-        function showGameRoom() {
-            lobbyView.classList.add('hidden');
-            gameRoomView.classList.remove('hidden');
-        }
-        
-        function showError(message) {
-            errorMessage.textContent = message;
-            errorModal.classList.remove('hidden');
-        }
-
-        // --- Rendu des éléments ---
         function renderRoomList(rooms) {
-            roomList.innerHTML = '';
+            if (!roomListEl) return;
+            roomListEl.innerHTML = '';
             Object.values(rooms).forEach(room => {
-                const roomElement = document.createElement('div');
-                roomElement.className = 'thumbnail rounded-lg flex flex-col items-center justify-center p-2 cursor-pointer hover:border-blue-500';
-                roomElement.innerHTML = `
-                    <div class="text-4xl mb-2">🚪</div>
-                    <p class="font-bold text-white text-sm truncate w-full text-center">${room.name}</p>
-                    <p class="font-mono text-xs text-gray-400">${room.playerCount} / ${room.maxPlayers}</p>
-                `;
+                const roomEl = document.createElement('div');
+                roomEl.className = 'thumbnail ui-bg p-4 flex flex-col items-center justify-center text-center cursor-pointer hover:border-blue-500';
+                roomEl.innerHTML = `<h3 class="text-xl font-bold mb-2">${room.name}</h3><p class="text-gray-400">Joueurs: ${room.playerCount} / ${room.maxPlayers}</p>`;
                 if (room.playerCount >= room.maxPlayers) {
-                    roomElement.classList.add('opacity-50', 'cursor-not-allowed');
+                    roomEl.classList.add('opacity-50', 'cursor-not-allowed');
                 } else {
-                    roomElement.addEventListener('click', () => socket.emit('joinRoom', room.id));
+                    roomEl.addEventListener('click', () => socket.emit('joinRoom', room.id));
                 }
-                roomList.appendChild(roomElement);
+                roomListEl.appendChild(roomEl);
             });
         }
-
-        function renderGameRoom(room) {
-            roomTitle.textContent = room.name;
-            playerGrid.innerHTML = '';
-            Object.values(room.players).forEach(player => {
-                const playerEl = document.createElement('div');
-                playerEl.id = `player-${player.id}`;
-                let classes = `thumbnail rounded-lg flex flex-col items-center justify-center p-2 ${player.team === 'A' ? 'team-a' : 'team-b'}`;
-                if (!player.isAlive) classes += ' dead';
-                if (player.isReady && room.gameState === 'LOBBY_VOTING') classes += ' ready';
-                if (player.id === myPlayerId && room.gameState === 'LOBBY_VOTING') classes += ' cursor-pointer hover:scale-105';
-                playerEl.className = classes;
-
-                playerEl.innerHTML = `
-                    <div class="text-4xl mb-2">${player.team === 'A' ? '🔵' : '🔴'}</div>
-                    <p class="font-bold text-black text-sm truncate w-full text-center">Joueur</p>
-                    <p class="font-mono text-xs text-gray-700">${player.id.substring(0, 5)}</p>
-                    ${player.isReady ? '<span class="text-green-800 font-bold text-xs mt-1">PRÊT</span>' : ''}
-                `;
-
-                if (player.id === myPlayerId && room.gameState === 'LOBBY_VOTING') {
-                    playerEl.addEventListener('click', () => socket.emit('playerReady'));
-                }
-                playerGrid.appendChild(playerEl);
-            });
-            updateGameStatus(room);
-        }
-
-        function updateGameStatus(room) {
-            switch (room.gameState) {
-                case 'LOBBY_VOTING':
-                    const readyCount = Object.values(room.players).filter(p => p.isReady).length;
-                    gameStatus.textContent = `Vote en cours: ${readyCount} / ${room.playerCount} prêts.`;
-                    break;
-                case 'IN_PROGRESS':
-                    gameStatus.textContent = 'Partie en cours !';
-                    break;
-                case 'GAME_OVER':
-                    // Géré par l'event 'gameOver'
-                    break;
-            }
-        }
-
         function renderPlayerList(players) {
-            playerList.innerHTML = '';
+            if (!playerListEl) return;
+            globalPlayerCountEl.textContent = players.length;
+            playerListEl.innerHTML = '';
             players.forEach(player => {
                 const playerEl = document.createElement('div');
                 playerEl.className = 'bg-gray-700 p-2 rounded-md text-sm';
                 playerEl.textContent = `Joueur ${player.id.substring(0, 5)}`;
-                playerList.appendChild(playerEl);
+                playerListEl.appendChild(playerEl);
             });
         }
 
-        function addChatMessage({ senderId, message }) {
-            const messageEl = document.createElement('p');
-            const senderName = senderId === myPlayerId ? 'Vous' : `Joueur ${senderId.substring(0, 5)}`;
-            messageEl.innerHTML = `<strong class="${senderId === myPlayerId ? 'text-blue-400' : 'text-green-400'}">${senderName}:</strong> ${message}`;
-            chatMessages.appendChild(messageEl);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+        const Config = {
+            BUBBLE_COLORS: [
+                { main: '#c62b39', shadow: '#69050d' }, { main: '#ffd304', shadow: '#957e18' }, { main: '#3bda0e', shadow: '#108209' },
+                { main: '#3ee2ee', shadow: '#2babb4' }, { main: '#5c68de', shadow: '#18169b' }, { main: '#af00c1', shadow: '#860094' },
+                { main: '#d8d6db', shadow: '#636b60' }
+            ],
+            GRID_ROWS: 13, GRID_COLS: 8, GAME_OVER_ROW: 11, LAUNCHER_ROTATION_SPEED: 0.03
+        };
+
+        const Game = {
+            state: 'waiting', players: new Map(), localPlayer: null, mainCanvas: null, mainCtx: null,
+            bubbleRadius: 0, keys: { left: false, right: false },
+
+            init() {
+                this.mainCanvas = document.getElementById('gameCanvas');
+                this.mainCtx = this.mainCanvas.getContext('2d');
+                InputHandler.init();
+                this.resizeCanvases();
+            },
+            start() { this.state = 'playing'; this.gameLoop(); },
+            gameLoop() {
+                if (Game.state !== 'playing' || !Game.localPlayer) return;
+                GameLogic.updateLocalAnimations();
+                Drawing.drawAll();
+                requestAnimationFrame(() => this.gameLoop());
+            },
+            updateFullGameState(room) {
+                if (!room) return;
+                document.getElementById('room-title').textContent = room.name;
+                const serverIds = new Set(Object.keys(room.players));
+                for (const id of this.players.keys()) if (!serverIds.has(id)) {
+                    const playerToRemove = this.players.get(id);
+                    if (playerToRemove.container) playerToRemove.container.remove();
+                    this.players.delete(id);
+                }
+                Object.values(room.players).forEach(pData => {
+                    if (this.players.has(pData.id)) this.players.get(pData.id).update(pData);
+                    else this.players.set(pData.id, new Player(pData.id, pData));
+                });
+                this.localPlayer = this.players.get(myPlayerId);
+                UI.renderOpponents();
+                UI.updatePlayerStats();
+                UI.updateVoteStatus(room);
+            },
+            resizeCanvases() {
+                const cont = document.getElementById('canvas-container');
+                if (this.mainCanvas && cont) {
+                    this.mainCanvas.width = cont.clientWidth;
+                    this.mainCanvas.height = cont.clientHeight;
+                    this.bubbleRadius = this.mainCanvas.width / (Config.GRID_COLS * 2 + 1) * 0.95;
+                }
+                this.players.forEach(p => {
+                    if (p.id !== myPlayerId && p.canvas) {
+                        const oppCont = p.canvas.parentElement;
+                        if (oppCont) { p.canvas.width = oppCont.clientWidth; p.canvas.height = oppCont.clientHeight; }
+                    }
+                });
+            }
+        };
+
+        class Player {
+            constructor(id, data) {
+                this.id = id;
+                this.launcher = { angle: -Math.PI / 2 };
+                if (id !== myPlayerId) {
+                    this.container = document.createElement('div');
+                    this.container.className = 'opponent-view game-area-bg';
+                    this.canvas = document.createElement('canvas');
+                    this.canvas.className = 'opponent-canvas';
+                    this.ctx = this.canvas.getContext('2d');
+                    this.container.appendChild(this.canvas);
+                }
+                this.update(data);
+            }
+            update(data) { Object.assign(this, data); }
         }
 
-        // --- Événements Socket.IO ---
-        socket.on('connect', () => {
-            myPlayerId = socket.id;
-            console.log('Connecté au serveur ! ID:', myPlayerId);
-        });
+        const GameLogic = {
+            updateLocalAnimations() {
+                if (!Game.localPlayer) return;
+                let rotSpeed = Config.LAUNCHER_ROTATION_SPEED;
+                if (Game.keys.left) Game.localPlayer.launcher.angle -= rotSpeed;
+                if (Game.keys.right) Game.localPlayer.launcher.angle += rotSpeed;
+                Game.localPlayer.launcher.angle = Math.max(-Math.PI + 0.1, Math.min(-0.1, Game.localPlayer.launcher.angle));
+            },
+            getBubbleCoords: (r, c, rad) => ({ x: rad + c * rad * 2 + (r % 2) * rad, y: rad + r * rad * 2 * 0.866 })
+        };
 
+        const Drawing = {
+            drawAll() {
+                if (!Game.localPlayer) return;
+                this.drawPlayer(Game.localPlayer, Game.mainCtx, true);
+                Game.players.forEach(p => { if (p.id !== myPlayerId && p.canvas) this.drawPlayer(p, p.ctx, false); });
+            },
+            drawPlayer(player, ctx, isMain) {
+                const canvas = isMain ? Game.mainCanvas : player.canvas; if (!canvas || canvas.width === 0) return;
+                const rad = canvas.width / (Config.GRID_COLS * 2 + 1) * 0.95;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                if (player.grid) for (let r = 0; r < Config.GRID_ROWS; r++) for (let c = 0; c < Config.GRID_COLS; c++) if (player.grid[r][c]) {
+                    const { x, y } = GameLogic.getBubbleCoords(r, c, rad);
+                    this.drawBubble(ctx, player.grid[r][c], rad, x, y);
+                }
+                if (player.shotBubble) this.drawBubble(ctx, player.shotBubble, rad, player.shotBubble.x, player.shotBubble.y);
+                if (isMain && player.isAlive) {
+                    const launcherY = canvas.height - rad * 2; const launcherX = canvas.width / 2;
+                    this.drawLauncher(ctx, player, rad, canvas.width, launcherY);
+                    if (player.launcherBubble) this.drawBubble(ctx, player.launcherBubble, rad, launcherX, launcherY, true);
+                    if (player.nextBubble) this.drawBubble(ctx, player.nextBubble, rad * 0.7, launcherX + rad * 2.5, launcherY + rad * 0.5);
+                }
+                if (!player.isAlive) {
+                    ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = 'white'; ctx.font = `bold ${canvas.width / 8}px Inter`; ctx.textAlign = 'center'; ctx.fillText('PERDU', canvas.width / 2, canvas.height / 2);
+                }
+            },
+            drawBubble(ctx, b, rad, x, y, isLauncher = false) {
+                if (!b || !b.color || !isFinite(x) || !isFinite(y) || !isFinite(rad) || rad <= 0) return;
+                ctx.fillStyle = b.color.shadow; ctx.beginPath(); ctx.arc(x, y, rad, 0, 2 * Math.PI); ctx.fill();
+                ctx.fillStyle = b.color.main; ctx.beginPath(); ctx.arc(x, y, rad * 0.9, 0, 2 * Math.PI); ctx.fill();
+                if (!isLauncher) {
+                    const grad = ctx.createRadialGradient(x - rad * 0.4, y - rad * 0.4, 0, x, y, rad);
+                    grad.addColorStop(0, 'rgba(255,255,255,0.2)'); grad.addColorStop(1, 'rgba(255,255,255,0)');
+                    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(x, y, rad * 0.9, 0, 2 * Math.PI); ctx.fill();
+                }
+            },
+            drawLauncher(ctx, p, rad, w, y) {
+                ctx.save(); ctx.translate(w / 2, y); ctx.rotate(p.launcher.angle + Math.PI / 2);
+                ctx.fillStyle = '#E5E7EB'; ctx.fillRect(-rad * 0.06, -rad * 1.3, rad * 0.12, -rad * 5.2); ctx.restore();
+            }
+        };
+
+        const UI = {
+            renderOpponents() {
+                const grid = document.getElementById('opponents-grid'); grid.innerHTML = '';
+                const opponents = Array.from(Game.players.values()).filter(p => p.id !== myPlayerId);
+                const slots = Array(10).fill(null); opponents.forEach((p, i) => { if (i < 10) slots[i] = p; });
+                slots.forEach(p => grid.appendChild(p ? p.container : this.createEmptySlot()));
+                Game.resizeCanvases();
+            },
+            createEmptySlot: () => { const s = document.createElement('div'); s.className = 'opponent-view empty-slot flex items-center justify-center'; s.innerHTML = `<span class="text-gray-500">En attente...</span>`; return s; },
+            updatePlayerStats() {
+                if (!Game.localPlayer) return;
+                document.getElementById('level').textContent = Game.localPlayer.level;
+                document.getElementById('score').textContent = Game.localPlayer.score;
+            },
+            updateVoteStatus(room) {
+                const ready = Object.values(room.players).filter(p => p.isReady).length;
+                const total = room.playerCount;
+                document.getElementById('game-status').textContent = `En attente... ${ready}/${total} joueurs sont prêts.`;
+                Game.players.forEach(p => {
+                    const container = p.id === myPlayerId ? document.getElementById('canvas-container') : p.container;
+                    if (container) {
+                        let overlay = container.querySelector('.ready-overlay');
+                        if (p.isReady && room.state === 'LOBBY_VOTING') {
+                            if (!overlay) {
+                                overlay = document.createElement('div'); overlay.className = 'ready-overlay';
+                                overlay.textContent = 'Prêt!'; container.appendChild(overlay);
+                            }
+                        } else if (overlay) overlay.remove();
+                    }
+                });
+            }
+        };
+
+        const InputHandler = {
+            init() {
+                window.addEventListener('keydown', this.handleKeyDown); window.addEventListener('keyup', this.handleKeyUp);
+                window.addEventListener('resize', Game.resizeCanvases);
+                document.getElementById('leave-room-btn').addEventListener('click', () => window.location.reload());
+                document.getElementById('canvas-container').addEventListener('click', () => {
+                    if (Game.state === 'waiting' && Game.localPlayer) socket.emit('playerReady');
+                    else if (Game.state === 'playing') this.handleShoot();
+                });
+            },
+            handleKeyDown(e) {
+                if (Game.state !== 'playing' || !Game.localPlayer?.isAlive) return;
+                if (e.key === 'ArrowLeft') Game.keys.left = true; if (e.key === 'ArrowRight') Game.keys.right = true;
+                if (e.key === 'ArrowUp') { e.preventDefault(); this.handleShoot(); }
+            },
+            handleKeyUp(e) { if (e.key === 'ArrowLeft') Game.keys.left = false; if (e.key === 'ArrowRight') Game.keys.right = false; },
+            handleShoot() {
+                const p = Game.localPlayer;
+                if (Game.state !== 'playing' || !p?.isAlive || !p.launcherBubble) return;
+                socket.emit('playerAction', { type: 'shoot', angle: p.launcher.angle });
+            }
+        };
+
+        socket.on('connect', () => { myPlayerId = socket.id; console.log('Connecté ! ID:', myPlayerId); showLobby(); Game.init(); });
         socket.on('roomListUpdate', renderRoomList);
         socket.on('updatePlayerList', renderPlayerList);
-        socket.on('chatMessage', addChatMessage);
-        
-        socket.on('updateRoom', (room) => {
-            // C'est ici que la magie opère pour corriger la page blanche
-            showGameRoom();
-            renderGameRoom(room);
-        });
-        
-        socket.on('gameStarted', (room) => {
-            renderGameRoom(room);
-            gameStatus.textContent = 'La partie commence !';
-        });
-        
-        socket.on('gameOver', ({ winningTeam }) => {
-            gameStatus.textContent = winningTeam ? `L'équipe ${winningTeam === 'A' ? 'Bleue' : 'Rouge'} a gagné !` : 'Match nul !';
-        });
-
-        socket.on('error', showError);
-        
-        socket.on('forceDisconnect', (message) => {
-            alert(message);
-            window.location.reload();
-        });
-        
-        socket.on('disconnect', () => {
-            showError('Déconnecté du serveur. Rechargement...');
-            setTimeout(() => window.location.reload(), 3000);
-        });
-
-        // --- Gestionnaires d'événements DOM ---
-        leaveRoomBtn.addEventListener('click', () => {
-            window.location.reload();
-        });
-
-        chatForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const message = chatInput.value;
-            if (message.trim()) {
-                socket.emit('sendMessage', message);
-                chatInput.value = '';
-            }
-        });
-
+        socket.on('updateRoom', (room) => { showGameRoom(); Game.state = 'waiting'; Game.updateFullGameState(room); });
+        socket.on('gameStarted', (room) => { Game.state = 'playing'; Game.updateFullGameState(room); Game.start(); });
+        socket.on('gameStateUpdate', (room) => { if (Game.state === 'playing') Game.updateFullGameState(room); });
+        socket.on('gameOver', () => { Game.state = 'gameover'; document.getElementById('game-status').textContent = "Partie terminée !"; });
+    });
     </script>
 </body>
 </html>
